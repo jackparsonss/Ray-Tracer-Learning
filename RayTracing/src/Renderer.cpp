@@ -16,7 +16,7 @@ namespace utils
 	}
 }
 
-void Renderer::render(const Camera& camera)
+void Renderer::render(const Scene& scene, const Camera& camera)
 {
 	Ray ray;
 	ray.Origin = camera.GetPosition();
@@ -34,7 +34,7 @@ void Renderer::render(const Camera& camera)
 			// coord.x *= aspect_ratio; // prevent stretching
 			ray.Direction = camera.GetRayDirections()[x + y * m_FinalImage->GetWidth()];
 
-			glm::vec4 color = trace_ray(ray);
+			glm::vec4 color = trace_ray(scene, ray);
 			color = glm::clamp(color, glm::vec4(0.0f), glm::vec4(1.0f));
 
 			m_ImageData[x + y * m_FinalImage->GetWidth()] = utils::convert_to_RGBA(color);
@@ -62,43 +62,63 @@ void Renderer::on_resize(uint32_t width, uint32_t height)
 	m_ImageData = new uint32_t[width * height];
 }
 
-glm::vec4 Renderer::trace_ray(const Ray& ray)
+glm::vec4 Renderer::trace_ray(const Scene& scene, const Ray& ray)
 {
 	glm::vec3 sphere_origin(0.0f, 0.0f, 0.0f);
-	float radius = 0.5f;
 	// ray_direction = glm::normalize(ray_direction); // causes a=1 always but more expensive computation than dot product
  
 	// a = ray origin
 	// b = ray direction
 	// r = radius
 	// t = hit distance
-	
-	// setup for quadratic equation
-	float a = glm::dot(ray.Direction, ray.Direction);
-	float b = 2.0f * glm::dot(ray.Origin, ray.Direction);
-	float c = glm::dot(ray.Origin, ray.Origin) - radius * radius;
 
-	// use quadratic equation to check disc
-	float discriminant = b * b - 4.0f * a * c;
-
-	if(discriminant < 0.0f)
-	{
+	if(scene.Spheres.empty())
 		return glm::vec4(0, 0, 0, 1);
+
+
+	const Sphere* closestSphere = nullptr;
+	float hitDistance = std::numeric_limits<float>::max();
+
+	for(const Sphere& sphere: scene.Spheres)
+	{
+		float radius = sphere.Radius;
+
+		glm::vec3 origin = ray.Origin - sphere.Position;
+	
+		// setup for quadratic equation
+		float a = glm::dot(ray.Direction, ray.Direction);
+		float b = 2.0f * glm::dot(origin, ray.Direction);
+		float c = glm::dot(origin, origin) - radius * radius;
+
+		// use quadratic equation to check disc
+		float discriminant = b * b - 4.0f * a * c;
+
+		if (discriminant < 0.0f)
+			continue;
+
+		// solve quadratic equation
+		// float t0 = (-b + glm::sqrt(discriminant)) / (2.0f * a);
+		float t1 = (-b - glm::sqrt(discriminant)) / (2.0f * a);
+		if(t1 < hitDistance)
+		{
+			hitDistance = t1;
+			closestSphere = &sphere;
+		}
 	}
 
-	// solve quadratic equation
-	float t0 = (-b + glm::sqrt(discriminant)) / (2.0f * a);
-	float t1 = (-b - glm::sqrt(discriminant)) / (2.0f * a);
+	if (closestSphere == nullptr)
+		return glm::vec4(0, 0, 0, 1);
 
+	glm::vec3 origin = ray.Origin - closestSphere->Position;
 	// glm::vec3 hit_point0 = ray_origin + ray_direction * t0;
-	glm::vec3 hit_point1 = ray.Origin + ray.Direction * t1; // closest hit(smallest value, closer to camera)
+	glm::vec3 hit_point1 = origin + ray.Direction * hitDistance; // closest hit(smallest value, closer to camera)
 	glm::vec3 normal = glm::normalize(hit_point1 - sphere_origin);
 
 	glm::vec3 light_direction = glm::normalize(glm::vec3(-1, -1, -1));
 
 	float d = glm::max(glm::dot(normal, -light_direction), 0.0f); // same as cos(angle)j
 
-	glm::vec3 sphereColor(0, 1, 1);
+	glm::vec3 sphereColor = closestSphere->Albedo;
 	sphereColor *= d;
 	return glm::vec4(sphereColor, 1.0f);
 }
